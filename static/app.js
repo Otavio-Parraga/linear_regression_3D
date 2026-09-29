@@ -34,14 +34,34 @@ function t(key, vars) {
   return s;
 }
 
+const SUP = { "-": "⁻", 0: "⁰", 1: "¹", 2: "²", 3: "³", 4: "⁴", 5: "⁵", 6: "⁶", 7: "⁷", 8: "⁸", 9: "⁹" };
+
 function fmt(v, d = 3) {
   if (!Number.isFinite(v)) return "—";
+  if (Math.abs(v) >= 1e5) {           // e.g. after divergence: 3.14×10¹¹ keeps the layout intact
+    const [mant, exp] = v.toExponential(1).split("e");
+    return `${mant}×10${String(+exp).replace(/./g, (ch) => SUP[ch])}`;
+  }
   const s = v.toFixed(d);
   return s === `-${(0).toFixed(d)}` ? (0).toFixed(d) : s;
 }
 
+// Same rule for KaTeX formulas.
+function texNum(v, d = 2) {
+  if (Math.abs(v) >= 1e5) {
+    const [mant, exp] = v.toExponential(2).split("e");
+    return `${mant}\\times10^{${+exp}}`;
+  }
+  return fmt(v, d);
+}
+
 function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function withAlpha(hex, alpha) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,6 +103,23 @@ function convert(theta, from, to) {
   return to === "normalized" ? toNormalized(theta) : toOriginal(theta);
 }
 
+function inGrid([a, b]) {
+  const r = scaleData().range;
+  return a >= r.t0[0] && a <= r.t0[1] && b >= r.t1[0] && b <= r.t1[1];
+}
+
+// Gradient descent on this quadratic converges iff α < 2/λmax(H), where
+// H = (1/m) Σ [[1, f], [f, f²]] is the Hessian of J.
+function stableAlpha() {
+  const f = feature(), m = f.length;
+  const mf = f.reduce((s, v) => s + v, 0) / m;
+  const mf2 = f.reduce((s, v) => s + v * v, 0) / m;
+  const lmax = (1 + mf2) / 2 + Math.hypot((1 - mf2) / 2, mf);
+  const amax = 2 / lmax;
+  const p = 10 ** (Math.floor(Math.log10(amax)) - 1);
+  return +(Math.floor(amax / p + 1e-3) * p).toPrecision(2);
+}
+
 function startTheta() {
   // A deliberately poor starting line, defined in the original scale so that
   // switching scales shows the same line.
@@ -102,6 +139,7 @@ function configureSliders() {
     el.step = (hi - lo) / 1000;
   });
   $("alpha").value = state.alpha[state.scale];
+  $("alphaHint").textContent = t("alphaHint", { amax: stableAlpha() });
 }
 
 function syncInputs(skip) {
@@ -110,6 +148,11 @@ function syncInputs(skip) {
   $("t1Range").value = b;
   if (skip !== "t0Num") $("t0Num").value = +a.toFixed(4);
   if (skip !== "t1Num") $("t1Num").value = +b.toFixed(4);
+  $("t0Range").setAttribute("aria-valuetext", `θ0 = ${fmt(a, 2)}`);
+  $("t1Range").setAttribute("aria-valuetext", `θ1 = ${fmt(b, 3)}`);
+  const r = scaleData().range;
+  $("t0Out").hidden = a >= r.t0[0] && a <= r.t0[1];
+  $("t1Out").hidden = b >= r.t1[0] && b <= r.t1[1];
 }
 
 let frame = null;
@@ -146,7 +189,18 @@ function bindControls() {
   $("runBtn").addEventListener("click", runGD);
   $("convBtn").addEventListener("click", runToConvergence);
   $("optBtn").addEventListener("click", () => setTheta(scaleData().theta_star.slice()));
-  $("resetBtn").addEventListener("click", () => setTheta(startTheta()));
+  const reset = () => setTheta(startTheta());
+  $("resetBtn").addEventListener("click", reset);
+  $("statusReset").addEventListener("click", reset);
+
+  // S = one step, R = run to convergence (again = stop), Esc = stop
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest("input, textarea, select")) return;
+    const k = e.key.toLowerCase();
+    if (k === "s") { e.preventDefault(); gdStep(); }
+    else if (k === "r") { e.preventDefault(); runToConvergence(); }
+    else if (k === "escape") stopRun();
+  });
 
   document.querySelectorAll("[data-scale]").forEach((btn) =>
     btn.addEventListener("click", () => setScale(btn.dataset.scale)));
@@ -161,11 +215,21 @@ function bindControls() {
     savePref("theme", next);
     render();
   });
-  $("langBtn").addEventListener("click", () => {
-    state.lang = state.lang === "en" ? "pt" : "en";
-    savePref("lang", state.lang);
-    applyLanguage();
-    render();
+  document.querySelectorAll("[data-lang]").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      if (btn.dataset.lang === state.lang) return;
+      state.lang = btn.dataset.lang;
+      savePref("lang", state.lang);
+      applyLanguage();
+      render();
+    }));
+}
+
+function markActive(selector, key, value) {
+  document.querySelectorAll(selector).forEach((b) => {
+    const on = b.dataset[key] === value;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on);
   });
 }
 
@@ -176,8 +240,7 @@ function setScale(scale) {
   state.theta = convert(state.theta, from, scale);
   state.path = state.path.map(([a, b, j]) => [...convert([a, b], from, scale), j]);
   state.scale = scale;
-  document.querySelectorAll("[data-scale]").forEach((b) =>
-    b.classList.toggle("active", b.dataset.scale === scale));
+  markActive("[data-scale]", "scale", scale);
   configureSliders();
   syncInputs();
   render();
@@ -211,7 +274,7 @@ function afterAdvance(result) {
   scheduleRender();
   const n = state.iter;
   if (result === "converged") setStatus("statusConverged", { n, tol: GD_TOL }, "ok");
-  else if (result === "diverged") setStatus("statusDiverged", { n }, "bad");
+  else if (result === "diverged") setStatus("statusDiverged", { n, amax: stableAlpha() }, "bad");
   else if (result === "max") setStatus("statusMax", { n }, "bad");
   else setStatus("statusRunning", { n, j: fmt(costAndGrad(state.theta).J, 4) });
 }
@@ -222,6 +285,7 @@ function gdStep() {
 }
 
 function runGD() {
+  if (state.running && state.running.kind === "steps") { stopRun(); return; }
   stopRun();
   let n = 0;
   const id = setInterval(() => {
@@ -268,10 +332,11 @@ function stopRun() {
 }
 
 function updateRunUi() {
-  const converging = !!(state.running && state.running.kind === "converge");
-  const btn = $("convBtn");
-  btn.textContent = t(converging ? "stop" : "converge");
-  btn.classList.toggle("stop", converging);
+  const kind = state.running && state.running.kind;
+  $("convBtn").textContent = t(kind === "converge" ? "stop" : "converge");
+  $("convBtn").classList.toggle("stop", kind === "converge");
+  $("runBtn").textContent = t(kind === "steps" ? "stop" : "run");
+  $("runBtn").classList.toggle("stop", kind === "steps");
 }
 
 function setStatus(key, vars, tone = "") {
@@ -281,30 +346,38 @@ function setStatus(key, vars, tone = "") {
 
 function renderStatus() {
   const el = $("gdStatus"), st = state.status;
-  el.textContent = st ? t(st.key, st.vars) : "";
-  el.dataset.tone = st ? st.tone : "";
+  el.hidden = !st;
+  if (!st) return;
+  // Progress updates every frame; only the final outcome is announced.
+  el.setAttribute("aria-live", st.tone ? "polite" : "off");
+  el.dataset.tone = st.tone;
+  el.title = st.tone === "ok" ? t("statusTol", { tol: GD_TOL }) : "";
+  el.querySelector(".gd-text").textContent = t(st.key, st.vars);
+  $("statusReset").hidden = st.tone !== "bad";
 }
 
 // ---------------------------------------------------------------------------
 // Camera / drag mode
 // ---------------------------------------------------------------------------
 const VIEWS = {
-  iso: { eye: { x: 1.55, y: -1.55, z: 0.95 }, up: { x: 0, y: 0, z: 1 } },
-  top: { eye: { x: 0, y: 0, z: 2.4 }, up: { x: 0, y: 1, z: 0 } },
-  t0: { eye: { x: 0, y: -2.4, z: 0.15 }, up: { x: 0, y: 0, z: 1 } },
-  t1: { eye: { x: 2.4, y: 0, z: 0.15 }, up: { x: 0, y: 0, z: 1 } },
+  iso: { eye: { x: 1.4, y: -1.45, z: 0.85 }, up: { x: 0, y: 0, z: 1 } },
+  top: { eye: { x: 0, y: 0, z: 2.1 }, up: { x: 0, y: 1, z: 0 } },
+  t0: { eye: { x: 0, y: -2.1, z: 0.12 }, up: { x: 0, y: 0, z: 1 } },
+  t1: { eye: { x: 2.1, y: 0, z: 0.12 }, up: { x: 0, y: 0, z: 1 } },
 };
+
+const VIEW_CENTER = { x: 0, y: 0, z: -0.06 };
 
 function setView(name) {
   if (!HAS_WEBGL) return;
-  state.camera = { ...VIEWS[name], center: { x: 0, y: 0, z: 0 } };
+  state.camera = { ...VIEWS[name], center: VIEW_CENTER };
+  markActive("[data-view]", "view", name);
   render();
 }
 
 function setDrag(mode) {
   state.drag = mode;
-  document.querySelectorAll("[data-drag]").forEach((b) =>
-    b.classList.toggle("active", b.dataset.drag === mode));
+  markActive("[data-drag]", "drag", mode);
   if (HAS_WEBGL) Plotly.relayout(surfaceEl, { "scene.dragmode": mode });
 }
 
@@ -314,7 +387,10 @@ function setDrag(mode) {
 function applyLanguage() {
   document.documentElement.lang = state.lang === "pt" ? "pt-BR" : "en";
   document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
-  $("langBtn").textContent = state.lang === "en" ? "PT" : "EN";
+  document.querySelectorAll("[data-i18n-label]").forEach((el) => el.setAttribute("aria-label", t(el.dataset.i18nLabel)));
+  markActive("[data-lang]", "lang", state.lang);
+  $("keysHint").innerHTML = t("keysHint", { s: "<kbd>S</kbd>", r: "<kbd>R</kbd>", esc: "<kbd>Esc</kbd>" });
+  if (state.model) $("alphaHint").textContent = t("alphaHint", { amax: stableAlpha() });
   updateRunUi();
   renderStatus();
   document.title = t("title");
@@ -328,22 +404,28 @@ function render() {
   renderTable();
   renderSurface(J, grad);
   renderLine();
+  const s = scaleData(), [a, b] = state.theta, v = state.scale === "normalized" ? "z" : "x";
+  surfaceEl.setAttribute("aria-label", t("surfaceAria", {
+    a: fmt(a, 2), b: fmt(b, 3), j: fmt(J, 3), js: fmt(s.J_star, 3), s0: fmt(s.theta_star[0], 2), s1: fmt(s.theta_star[1], 3),
+  }));
+  lineEl.setAttribute("aria-label", t("lineAria", { a: fmt(a, 2), b: fmt(b, 3), v, j: fmt(J, 3) }));
 }
 
 function signed(v, d = 2) {
-  return v < 0 ? `- ${fmt(-v, d)}` : `+ ${fmt(v, d)}`;
+  return v < 0 ? `- ${texNum(-v, d)}` : `+ ${texNum(v, d)}`;
 }
 
 function renderFormula() {
   const [a, b] = state.theta;
   const v = state.scale === "normalized" ? "z" : "x";
-  const tex = `h(${v}) = \\theta_0 + \\theta_1 ${v} = ${fmt(a, 2)} ${signed(b, 2)}\\,${v}`;
+  const tex = `h(${v}) = \\theta_0 + \\theta_1 ${v} = ${texNum(a, 2)} ${signed(b, 2)}\\,${v}`;
   katex.render(tex, $("formula"), { throwOnError: false });
 
   const m = ys().length;
   katex.render(
-    `J(\\theta)=\\frac{1}{2m}\\sum_{i=1}^{m}\\big(h(${v}^{(i)})-y^{(i)}\\big)^2,\\quad m=${m}`,
+    `J(\\theta)=\\frac{1}{2m}\\sum_{i=1}^{m}\\big(h(${v}^{(i)})-y^{(i)}\\big)^2`,
     $("costFormula"), { throwOnError: false });
+  $("mCount").textContent = `m = ${m}`;
 
   const note = $("normNote");
   if (state.scale === "normalized") {
@@ -358,8 +440,10 @@ function renderFormula() {
 
 function renderMetrics(J, grad) {
   $("jVal").textContent = fmt(J, 3);
+  $("jVal").classList.toggle("at-min", J - scaleData().J_star < 5e-4);
   $("g0Val").textContent = fmt(grad[0], 3);
   $("g1Val").textContent = fmt(grad[1], 3);
+  $("gnVal").textContent = fmt(Math.hypot(grad[0], grad[1]), 3);
   $("jStar").textContent = fmt(scaleData().J_star, 3);
 }
 
@@ -368,39 +452,50 @@ function renderTable() {
   const norm = state.scale === "normalized";
   const yhat = predict(state.theta);
   const cols = [t("colX"), ...(norm ? [t("colZ")] : []), t("colY"), t("colPred"), t("colErr"), t("colSq")];
-  $("dataTable").tHead.innerHTML = `<tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr>`;
+  $("dataTable").tHead.innerHTML = `<tr>${cols.map((c) => `<th scope="col">${c}</th>`).join("")}</tr>`;
 
-  let sse = 0;
-  const rows = x.map((xi, i) => {
-    const e = y[i] - yhat[i];
-    sse += e * e;
-    return `<tr><td>${fmt(xi, 1)}</td>${norm ? `<td>${fmt(f[i], 3)}</td>` : ""}` +
-      `<td>${fmt(y[i], 1)}</td><td class="pred">${fmt(yhat[i], 2)}</td>` +
-      `<td class="${e < 0 ? "neg" : ""}">${fmt(e, 2)}</td><td>${fmt(e * e, 2)}</td></tr>`;
-  });
+  const errs = y.map((yi, i) => yi - yhat[i]);
+  const sqs = errs.map((e) => e * e);
+  const sse = sqs.reduce((acc, v) => acc + v, 0);
+  const maxSq = Math.max(...sqs) || 1;
+  const rows = x.map((xi, i) =>
+    `<tr><td>${fmt(xi, 1)}</td>${norm ? `<td>${fmt(f[i], 3)}</td>` : ""}` +
+    `<td>${fmt(y[i], 1)}</td><td class="pred">${fmt(yhat[i], 2)}</td>` +
+    `<td>${fmt(errs[i], 2)}</td>` +
+    `<td class="sq" style="--w:${(100 * sqs[i] / maxSq).toFixed(1)}%">${fmt(sqs[i], 2)}</td></tr>`);
   $("dataTable").tBodies[0].innerHTML = rows.join("");
 
   const pad = cols.length - 2;
   $("dataTable").tFoot.innerHTML =
-    `<tr><td colspan="${pad}"></td><td>${t("sum")}</td><td>${fmt(sse, 2)}</td></tr>` +
-    `<tr><td colspan="${pad}"></td><td>J = Σ/2m</td><td>${fmt(sse / (2 * y.length), 3)}</td></tr>`;
+    `<tr><td colspan="${pad}"></td><td class="lbl">${t("sum")}</td><td>${fmt(sse, 2)}</td></tr>` +
+    `<tr><td colspan="${pad}"></td><td class="lbl">J = Σ/2m</td><td class="j">${fmt(sse / (2 * y.length), 3)}</td></tr>`;
 }
 
 function themeLayout() {
-  const text = cssVar("--text"), grid = cssVar("--grid"), card = cssVar("--card");
-  return { text, grid, card, muted: cssVar("--muted") };
+  const fs = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  return {
+    text: cssVar("--text"), muted: cssVar("--muted"), grid: cssVar("--grid"),
+    card: cssVar("--card"), inset: cssVar("--inset"), border: cssVar("--border-strong"),
+    tick: Math.round(fs * 0.8), title: Math.round(fs * 0.95),
+  };
+}
+
+function hoverLabel(c) {
+  return { bgcolor: c.card, bordercolor: c.border, font: { color: c.text, family: "IBM Plex Mono, monospace", size: c.tick } };
 }
 
 function axis3d(title, range, c) {
   return {
-    title: { text: title, font: { color: c.text } },
+    title: { text: title, font: { color: c.text, size: c.title } },
+    tickfont: { color: c.muted, size: c.tick },
     range,
     autorange: false,
-    color: c.text,
     gridcolor: c.grid,
     zerolinecolor: c.grid,
-    showbackground: true,
-    backgroundcolor: c.card,
+    showline: false,
+    nticks: 6,
+    showbackground: false,
+    backgroundcolor: c.inset,
     showspikes: false,
   };
 }
@@ -412,6 +507,14 @@ const HAS_WEBGL = (() => {
   } catch (e) { return false; }
 })();
 
+// Height of the 3D box: always the whole landscape of the current scale, fixed,
+// so moving θ or running GD never rescales the view.
+function surfaceTop() {
+  const s = scaleData();
+  s.gridMax ??= Math.max(...s.grid.J.map((row) => Math.max(...row)));
+  return s.gridMax;
+}
+
 function renderSurface(J, grad) {
   if (!HAS_WEBGL) {
     surfaceEl.innerHTML = `<div class="no-webgl">${t("noWebgl")}</div>`;
@@ -419,119 +522,171 @@ function renderSurface(J, grad) {
   }
   const s = scaleData();
   const c = themeLayout();
-  const dark = document.documentElement.dataset.theme === "dark";
   const [a, b] = state.theta;
   const r0 = s.range.t0, r1 = s.range.t1;
   const w0 = r0[1] - r0[0], w1 = r1[1] - r1[0];
-  const zMax = Math.max(...s.grid.J.map((row) => Math.max(...row))) * 1.02;
-  const lift = zMax * 0.008; // keep overlays from sinking into the surface
+  const cap = surfaceTop();
+  const lift = cap * 0.01; // keep overlays from sinking into the surface
+  const col = {
+    point: cssVar("--point"), path: cssVar("--path"), deriv: cssVar("--deriv"),
+    opt: cssVar("--optimum"), accent: cssVar("--accent"), mesh: cssVar("--mesh"), derivStrong: cssVar("--deriv-strong"), planeFill: cssVar("--plane-fill"),
+  };
+  // z on the tangent plane at (a, b): J + g0 (t0 - a) + g1 (t1 - b)
+  const onPlane = (xx, yy) => J + grad[0] * (xx - a) + grad[1] * (yy - b);
 
   const surface = {
     type: "surface",
-    name: t("traceSurface"),
     x: s.grid.t0, y: s.grid.t1, z: s.grid.J,
-    colorscale: "Viridis",
-    opacity: 0.9,
+    colorscale: [[0, cssVar("--surf-0")], [0.28, cssVar("--surf-1")], [0.62, cssVar("--surf-2")], [1, cssVar("--surf-3")]],
+    cmin: 0, cmax: cap,
+    opacity: 0.97,
     showscale: false,
     contours: {
-      z: { show: true, usecolormap: true, project: { z: true }, width: 1 },
+      // fine mesh along θ₀ and θ₁, and level curves projected on the floor
+      x: { show: true, start: r0[0], end: r0[1], size: w0 / 12, color: withAlpha(col.mesh, 0.1), width: 1, highlight: false },
+      y: { show: true, start: r1[0], end: r1[1], size: w1 / 12, color: withAlpha(col.mesh, 0.1), width: 1, highlight: false },
+      z: {
+        show: true, start: cap / 14, end: cap, size: cap / 14,
+        color: withAlpha(col.accent, 0.5), width: 1.5, highlight: false,
+        project: { z: true },
+      },
     },
-    lighting: { ambient: 0.75, diffuse: 0.6, specular: 0.1, roughness: 0.9 },
+    lighting: { ambient: 0.62, diffuse: 0.72, specular: 0.28, roughness: 0.55, fresnel: 0.25 },
+    lightposition: { x: -20000, y: -40000, z: 60000 },
     hovertemplate: "θ₀ %{x:.2f}<br>θ₁ %{y:.3f}<br>J %{z:.2f}<extra></extra>",
   };
 
-  // Tangent plane at the current point: z = J + g0 (t0 - a) + g1 (t1 - b)
+  // Tangent plane patch + its outline
   const h0 = w0 * 0.1, h1 = w1 * 0.1;
   const px = [a - h0, a + h0], py = [b - h1, b + h1];
-  const pz = py.map((yy) => px.map((xx) => J + grad[0] * (xx - a) + grad[1] * (yy - b)));
   const plane = {
     type: "surface",
-    name: t("tracePlane"),
-    x: px, y: py, z: pz,
+    x: px, y: py, z: py.map((yy) => px.map((xx) => onPlane(xx, yy) + lift * 0.5)),
     surfacecolor: [[0, 0], [0, 0]],
-    colorscale: [[0, cssVar("--plane")], [1, cssVar("--plane")]],
-    cmin: 0, cmax: 1,
-    showscale: false,
-    opacity: 0.55,
-    showlegend: true,
-    hoverinfo: "skip",
+    colorscale: [[0, col.planeFill], [1, col.planeFill]], cmin: 0, cmax: 1,
+    showscale: false, opacity: 0.38, hoverinfo: "skip",
+  };
+  const corners = [[px[0], py[0]], [px[1], py[0]], [px[1], py[1]], [px[0], py[1]], [px[0], py[0]]];
+  const planeEdge = {
+    type: "scatter3d", mode: "lines", hoverinfo: "skip",
+    x: corners.map((p) => p[0]), y: corners.map((p) => p[1]), z: corners.map(([xx, yy]) => onPlane(xx, yy) + lift * 0.5),
+    line: { color: col.derivStrong, width: 5 },
+  };
+  // Slices of the plane along θ₀ and θ₁ through the point: their slopes are ∂J/∂θ₀ and ∂J/∂θ₁.
+  const slices = {
+    type: "scatter3d", mode: "lines", hoverinfo: "skip",
+    x: [px[0], px[1], null, a, a], y: [b, b, null, py[0], py[1]],
+    z: [onPlane(px[0], b), onPlane(px[1], b), null, onPlane(a, py[0]), onPlane(a, py[1])].map((v) => (v === null ? null : v + lift * 0.5)),
+    line: { color: col.derivStrong, width: 2.5, dash: "dot" },
   };
 
-  // Descent direction -∇J, drawn along the tangent plane; length is scaled
-  // relative to the axis ranges so it is always visible.
-  const gn = Math.hypot(grad[0] / w0, grad[1] / w1);
+  // −∇J: direction only (length is fixed relative to the axes), with a head
+  // drawn in the tangent plane so it reads as an arrow from any angle.
   let arrow = { x: [], y: [], z: [] };
   if (Math.hypot(grad[0], grad[1]) > GD_TOL * 10) {
-    const k = 0.2 / gn;
-    const d0 = -k * grad[0], d1 = -k * grad[1];
-    arrow = { x: [a, a + d0], y: [b, b + d1], z: [J + lift, J + grad[0] * d0 + grad[1] * d1 + lift] };
+    const L = 0.3, head = 0.07, ang = 0.5;
+    const gn = Math.hypot(grad[0] / w0, grad[1] / w1);
+    const u = [-grad[0] / w0 / gn, -grad[1] / w1 / gn];            // unit, axis-relative
+    const toTheta = ([uu, vv]) => [a + uu * w0, b + vv * w1];
+    const tip = [u[0] * L, u[1] * L];
+    const rot = (th) => [
+      tip[0] + head * (-u[0] * Math.cos(th) + u[1] * Math.sin(th)),
+      tip[1] + head * (-u[1] * Math.cos(th) - u[0] * Math.sin(th)),
+    ];
+    const pts = [[0, 0], tip, null, rot(ang), tip, rot(-ang)].map((p) => (p ? toTheta(p) : null));
+    arrow = {
+      x: pts.map((p) => (p ? p[0] : null)),
+      y: pts.map((p) => (p ? p[1] : null)),
+      z: pts.map((p) => (p ? onPlane(p[0], p[1]) + lift : null)),
+    };
   }
-  const arrowLine = {
-    type: "scatter3d", mode: "lines+markers", name: t("traceGrad"),
-    ...arrow,
-    line: { color: cssVar("--arrow"), width: 8 },
-    marker: { size: [0, 7], symbol: "diamond", color: cssVar("--arrow") },
-    hoverinfo: "skip",
+  const arrowTrace = {
+    type: "scatter3d", mode: "lines", hoverinfo: "skip", ...arrow,
+    line: { color: col.derivStrong, width: 9 },
   };
 
-  const drop = {
-    type: "scatter3d", mode: "lines+markers", showlegend: false,
-    x: [a, a], y: [b, b], z: [J, 0],
-    line: { color: cssVar("--point"), width: 3, dash: "dash" },
-    marker: { size: [0, 4], color: cssVar("--point") },
-    hoverinfo: "skip",
+  // Long runs have thousands of tiny steps; draw only visibly distinct points.
+  // A path that leaves the box (divergence) is cut at the box edge.
+  const pts = [];
+  const inside = (p) => inGrid(p) && p[2] <= cap;
+  for (let i = 0; i < state.path.length; i++) {
+    const p = state.path[i], q = pts[pts.length - 1];
+    if (!inside(p)) {
+      if (q) pts.push([Math.min(Math.max(p[0], r0[0]), r0[1]), Math.min(Math.max(p[1], r1[0]), r1[1]), Math.min(p[2], cap)]);
+      break;
+    }
+    if (!q || i === state.path.length - 1 || Math.hypot((p[0] - q[0]) / w0, (p[1] - q[1]) / w1) > 0.003) pts.push(p);
+  }
+  const onChart = inside([a, b, J]);
+  const hide = (tr) => (onChart ? tr : { ...tr, x: [], y: [], z: [] });
+  const path = {
+    type: "scatter3d", mode: "lines+markers", hoverinfo: "skip",
+    x: pts.map((p) => p[0]), y: pts.map((p) => p[1]), z: pts.map((p) => p[2] + lift),
+    line: { color: col.path, width: 6 },
+    marker: { size: 3, color: col.path },
   };
+  // Shadows on the floor, so the path and points also read in the Top view.
+  const pathShadow = {
+    type: "scatter3d", mode: "lines", hoverinfo: "skip", opacity: 0.7,
+    x: pts.map((p) => p[0]), y: pts.map((p) => p[1]), z: pts.map(() => 0),
+    line: { color: col.path, width: 4 },
+  };
+
+  const drop = (xx, yy, zz, color) => ({
+    type: "scatter3d", mode: "lines+markers", hoverinfo: "skip",
+    x: [xx, xx], y: [yy, yy], z: [zz, 0],
+    line: { color, width: 3, dash: "dash" },
+    marker: { size: [0, 5], color, symbol: "circle" },
+  });
 
   const current = {
-    type: "scatter3d", mode: "markers", name: t("traceCurrent"),
+    type: "scatter3d", mode: "markers",
     x: [a], y: [b], z: [J + lift],
-    marker: { size: 9, color: cssVar("--point"), line: { color: dark ? "#000" : "#fff", width: 2 } },
+    marker: { size: 12, color: col.point, line: { color: "#ffffff", width: 3 } },
     hovertemplate: "θ₀ %{x:.2f}<br>θ₁ %{y:.3f}<br>J %{z:.3f}<extra></extra>",
+  };
+
+  const halo = {
+    type: "scatter3d", mode: "markers", hoverinfo: "skip", opacity: 0.28,
+    x: [a], y: [b], z: [J + lift],
+    marker: { size: 30, color: col.point, line: { width: 0 } },
   };
 
   const [s0, s1] = s.theta_star;
   const optimum = {
-    type: "scatter3d", mode: "markers", name: t("traceOptimum"),
-    x: [s0], y: [s1], z: [s.J_star],
-    marker: { size: 5, symbol: "x", color: c.text },
+    type: "scatter3d", mode: "markers",
+    x: [s0], y: [s1], z: [s.J_star + lift],
+    marker: { size: 7, symbol: "diamond", color: col.opt, line: { color: "#ffffff", width: 1.5 } },
     hovertemplate: "θ* (%{x:.2f}, %{y:.3f})<br>J* %{z:.3f}<extra></extra>",
   };
 
-  // Long runs have thousands of tiny steps; draw only visibly distinct points.
-  const pts = [];
-  state.path.forEach((p, i) => {
-    const q = pts[pts.length - 1];
-    if (!q || i === state.path.length - 1 || Math.hypot((p[0] - q[0]) / w0, (p[1] - q[1]) / w1) > 0.003) pts.push(p);
-  });
-  const path = {
-    type: "scatter3d", mode: "lines+markers", name: t("tracePath"),
-    x: pts.map((p) => p[0]), y: pts.map((p) => p[1]), z: pts.map((p) => p[2] + lift),
-    line: { color: c.text, width: 4 },
-    marker: { size: 3, color: c.text },
-    hoverinfo: "skip",
-  };
+  const eye = (state.camera && state.camera.eye) || VIEWS.iso.eye;
+  const topDown = Math.abs(eye.z) > 3 * Math.hypot(eye.x, eye.y);
 
   const layout = {
     uirevision: "keep",
     paper_bgcolor: c.card,
-    font: { family: "Inter, sans-serif", color: c.text, size: 12 },
-    margin: { l: 0, r: 0, t: 0, b: 0 },
-    showlegend: true,
-    legend: { orientation: "h", x: 0, y: 1, bgcolor: "rgba(0,0,0,0)", font: { color: c.text } },
+    font: { family: "IBM Plex Sans, sans-serif", color: c.text, size: c.tick },
+    margin: { l: 28, r: 8, t: 0, b: 0 },
+    showlegend: false,
+    hoverlabel: hoverLabel(c),
     scene: {
       uirevision: "keep",
       dragmode: state.drag,
       aspectmode: "manual",
-      aspectratio: { x: 1, y: 1, z: 0.75 },
+      aspectratio: { x: 1, y: 1, z: 0.74 },
       camera: state.camera,
       xaxis: axis3d("θ₀", r0, c),
       yaxis: axis3d("θ₁", r1, c),
-      zaxis: axis3d("J(θ)", [0, zMax], c),
+      // the floor; the height axis is hidden when looking straight down, where its labels would pile up
+      zaxis: { ...axis3d(topDown ? "" : "J(θ)", [0, cap], c), showbackground: true, showticklabels: !topDown },
     },
   };
 
-  Plotly.react(surfaceEl, [surface, plane, drop, arrowLine, path, optimum, current], layout,
-    { responsive: true, displaylogo: false, modeBarButtonsToRemove: ["toImage"] });
+  Plotly.react(surfaceEl, [
+    surface, hide(plane), hide(planeEdge), hide(slices), pathShadow, drop(s0, s1, s.J_star, col.opt),
+    hide(drop(a, b, J, col.point)), path, hide(arrowTrace), optimum, hide(halo), hide(current),
+  ], layout, { responsive: true, displaylogo: false, displayModeBar: false });
 }
 
 function renderLine() {
@@ -542,33 +697,36 @@ function renderLine() {
   const fMin = Math.min(...f), fMax = Math.max(...f);
   const pad = (fMax - fMin) * 0.08;
   const lx = [fMin - pad, fMax + pad];
-  const yMin = Math.min(...y), yMax = Math.max(...y);
+  const yMin = Math.min(...y), yMax = Math.max(...y), ySpan = yMax - yMin;
 
   const resid = { x: [], y: [] };
   f.forEach((v, i) => { resid.x.push(v, v, null); resid.y.push(y[i], yhat[i], null); });
 
   const traces = [
     { type: "scatter", mode: "lines", name: t("traceResid"), ...resid,
-      line: { color: cssVar("--resid"), width: 1.5, dash: "dot" }, hoverinfo: "skip" },
+      line: { color: cssVar("--resid"), width: 2, dash: "dot" }, hoverinfo: "skip" },
     { type: "scatter", mode: "lines", name: t("traceLine"),
-      x: lx, y: predict(state.theta, lx), line: { color: cssVar("--line"), width: 3 },
+      x: lx, y: predict(state.theta, lx), line: { color: cssVar("--line"), width: 3.5 },
       hovertemplate: `${norm ? "z" : "x"} %{x:.2f}<br>ŷ %{y:.2f}<extra></extra>` },
     { type: "scatter", mode: "markers", name: t("traceData"),
-      x: f, y, marker: { color: cssVar("--data"), size: 8 },
+      x: f, y, marker: { color: cssVar("--data"), size: 10, line: { color: c.card, width: 2 } },
       hovertemplate: `${norm ? "z" : "x"} %{x:.2f}<br>y %{y:.1f}<extra></extra>` },
   ];
 
   const ax = (title, range) => ({
-    title: { text: title }, range, color: c.muted, gridcolor: c.grid, zerolinecolor: c.grid,
+    title: { text: title, font: { size: c.tick, color: c.muted } }, range,
+    tickfont: { size: c.tick, color: c.muted }, gridcolor: c.grid, zeroline: false,
+    linecolor: c.border, ticks: "", automargin: true,
   });
   const layout = {
     paper_bgcolor: c.card, plot_bgcolor: c.card,
-    font: { family: "Inter, sans-serif", color: c.text, size: 12 },
-    margin: { l: 56, r: 12, t: 8, b: 44 },
+    font: { family: "IBM Plex Sans, sans-serif", color: c.text, size: c.tick },
+    margin: { l: 8, r: 8, t: 4, b: 8 },
     showlegend: true,
-    legend: { orientation: "h", x: 0, y: 1.12 },
+    legend: { orientation: "h", x: 0, y: 1, yanchor: "bottom", font: { size: c.tick, color: c.muted } },
+    hoverlabel: hoverLabel(c),
     xaxis: ax(norm ? t("axisZ") : t("axisX"), lx),
-    yaxis: ax(t("axisY"), [yMin - 25, yMax + 20]),
+    yaxis: ax(t("axisY"), [yMin - 0.3 * ySpan, yMax + 0.3 * ySpan]),
   };
   Plotly.react(lineEl, traces, layout, { responsive: true, displaylogo: false, displayModeBar: false });
 }
@@ -582,7 +740,8 @@ async function init() {
   const res = await fetch("/api/model");
   state.model = await res.json();
   configureSliders();
-  state.camera = { ...VIEWS.iso, center: { x: 0, y: 0, z: 0 } };
+  state.camera = { ...VIEWS.iso, center: VIEW_CENTER };
+  markActive("[data-view]", "view", "iso");
   state.theta = startTheta();
   syncInputs();
   render();
@@ -590,7 +749,10 @@ async function init() {
   // Click a point on the cost surface to jump there.
   // Remember where the user rotated to, so redraws never move the camera.
   if (HAS_WEBGL) surfaceEl.on("plotly_relayout", (ev) => {
-    if (ev["scene.camera"]) state.camera = ev["scene.camera"];
+    if (ev["scene.camera"]) {
+      state.camera = ev["scene.camera"];
+      markActive("[data-view]", "view", null); // user rotated away from the preset
+    }
   });
   if (HAS_WEBGL) surfaceEl.on("plotly_click", (ev) => {
     const p = ev.points && ev.points[0];

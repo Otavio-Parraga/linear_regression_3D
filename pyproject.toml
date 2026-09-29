@@ -1,7 +1,7 @@
 [project]
-name = "reg-lin"
+name = "linear-regression-3d"
 version = "0.1.0"
-description = "Add your description here"
+description = "Interactive 3D explorer of the linear regression cost function and gradient descent"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

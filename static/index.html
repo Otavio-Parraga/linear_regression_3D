@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Regression Cost Explorer</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
   <link rel="stylesheet" href="/static/style.css">
   <script>
@@ -24,95 +25,144 @@
       <p class="subtitle" data-i18n="subtitle">Change the parameters and watch the cost surface respond.</p>
     </div>
     <div class="toggles">
-      <div class="seg" role="group" aria-label="Scale">
-        <button type="button" data-scale="original" class="active" data-i18n="scaleOriginal">Original scale</button>
-        <button type="button" data-scale="normalized" data-i18n="scaleNormalized">Normalized</button>
+      <span class="toggle-label" id="scaleLabel" data-i18n="scaleLabel">Feature scale</span>
+      <div class="seg" role="group" aria-labelledby="scaleLabel">
+        <button type="button" data-scale="original" class="active" aria-pressed="true" data-i18n="scaleOriginal">Original</button>
+        <button type="button" data-scale="normalized" aria-pressed="false" data-i18n="scaleNormalized">Normalized</button>
       </div>
-      <button type="button" id="langBtn" class="pill" title="Language">PT</button>
-      <button type="button" id="themeBtn" class="pill" aria-label="Toggle theme">
-        <span class="icon-sun">☀</span><span class="icon-moon">☾</span>
+      <div class="seg" role="group" aria-label="Language">
+        <button type="button" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" data-lang="pt" aria-pressed="false">PT</button>
+      </div>
+      <button type="button" id="themeBtn" class="icon-btn" data-i18n-label="toggleTheme" aria-label="Toggle light and dark theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11z"/></svg>
       </button>
     </div>
   </header>
 
   <main class="layout">
-    <section class="card controls">
-      <h2 data-i18n="hypothesis">Regression function</h2>
-      <div id="formula" class="formula"></div>
-      <div id="normNote" class="note" hidden></div>
+    <!-- Left: the function, its cost, and gradient descent -->
+    <section class="card controls" aria-labelledby="hypTitle">
+      <div class="block">
+        <div class="block-head">
+          <h2 id="hypTitle" data-i18n="hypothesis">Regression function</h2>
+          <div class="actions">
+            <button type="button" id="optBtn" class="btn ghost" data-i18n="goOptimum">Go to θ*</button>
+            <button type="button" id="resetBtn" class="btn ghost" data-i18n="reset">Reset</button>
+          </div>
+        </div>
+        <div id="formula" class="formula"></div>
+        <p id="normNote" class="note" hidden></p>
 
-      <div class="param">
-        <label for="t0Range">θ<sub>0</sub> <span class="muted" data-i18n="intercept">intercept</span></label>
-        <div class="param-row">
+        <div class="param">
+          <div class="param-head">
+            <label for="t0Range">θ<sub>0</sub> <span class="muted" data-i18n="intercept">intercept</span></label>
+            <input type="number" id="t0Num" step="any" inputmode="decimal" data-i18n-label="t0Value" aria-label="θ0 value">
+          </div>
           <input type="range" id="t0Range">
-          <input type="number" id="t0Num" step="any">
+          <p class="range-note" id="t0Out" data-i18n="outOfRange" hidden>outside the plotted range</p>
         </div>
-      </div>
-      <div class="param">
-        <label for="t1Range">θ<sub>1</sub> <span class="muted" data-i18n="slope">slope</span></label>
-        <div class="param-row">
+        <div class="param">
+          <div class="param-head">
+            <label for="t1Range">θ<sub>1</sub> <span class="muted" data-i18n="slope">slope</span></label>
+            <input type="number" id="t1Num" step="any" inputmode="decimal" data-i18n-label="t1Value" aria-label="θ1 value">
+          </div>
           <input type="range" id="t1Range">
-          <input type="number" id="t1Num" step="any">
+          <p class="range-note" id="t1Out" data-i18n="outOfRange" hidden>outside the plotted range</p>
         </div>
       </div>
 
-      <div class="metrics">
-        <div class="metric">
-          <span class="metric-label" data-i18n="cost">Cost</span>
-          <span id="jVal" class="metric-value">–</span>
+      <div class="block">
+        <div class="block-head">
+          <h2 data-i18n="costTitle">Cost</h2>
+          <span id="mCount" class="muted"></span>
         </div>
-        <div class="metric">
-          <span class="metric-label">∂J/∂θ<sub>0</sub></span>
-          <span id="g0Val" class="metric-value">–</span>
+        <div id="costFormula" class="formula"></div>
+        <div class="cost-row">
+          <div class="cost-main">
+            <span class="metric-label">J(θ)</span>
+            <span id="jVal" class="cost-value">–</span>
+          </div>
+          <div class="cost-min">
+            <span class="metric-label" data-i18n="minimum">minimum J*</span>
+            <span id="jStar" class="metric-value">–</span>
+          </div>
         </div>
-        <div class="metric">
-          <span class="metric-label">∂J/∂θ<sub>1</sub></span>
-          <span id="g1Val" class="metric-value">–</span>
-        </div>
-        <div class="metric">
-          <span class="metric-label" data-i18n="minimum">Minimum J*</span>
-          <span id="jStar" class="metric-value">–</span>
-        </div>
-      </div>
-      <div id="costFormula" class="formula small"></div>
-
-      <div class="gd">
-        <label for="alpha">α <span class="muted" data-i18n="learningRate">learning rate</span></label>
-        <input type="number" id="alpha" step="any" min="0">
-        <button type="button" id="stepBtn" data-i18n="step">Step GD</button>
-        <button type="button" id="runBtn" data-i18n="run">Run 30</button>
-        <button type="button" id="convBtn">Run to convergence</button>
-      </div>
-      <p id="gdStatus" class="gd-status" aria-live="polite"></p>
-      <div class="actions">
-        <button type="button" id="optBtn" class="ghost" data-i18n="goOptimum">Go to θ*</button>
-        <button type="button" id="resetBtn" class="ghost" data-i18n="reset">Reset</button>
-      </div>
-    </section>
-
-    <section class="card surface-card">
-      <div class="card-head">
-        <h2 data-i18n="surfaceTitle">Cost surface J(θ₀, θ₁)</h2>
-        <div class="view-tools">
-          <span class="muted" data-i18n="view">View</span>
-          <button type="button" class="chip" data-view="iso" data-i18n="viewIso">3D</button>
-          <button type="button" class="chip" data-view="top" data-i18n="viewTop">Top</button>
-          <button type="button" class="chip" data-view="t0">θ₀</button>
-          <button type="button" class="chip" data-view="t1">θ₁</button>
-          <span class="sep"></span>
-          <span class="muted" data-i18n="rotate">Rotate</span>
-          <div class="seg small" role="group">
-            <button type="button" data-drag="orbit" class="active" data-i18n="orbit">Orbit</button>
-            <button type="button" data-drag="turntable" data-i18n="turntable">Turntable</button>
+        <div class="grad-row">
+          <div class="metric">
+            <span class="metric-label">∂J/∂θ<sub>0</sub></span>
+            <span id="g0Val" class="metric-value deriv">–</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">∂J/∂θ<sub>1</sub></span>
+            <span id="g1Val" class="metric-value deriv">–</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">‖∇J‖</span>
+            <span id="gnVal" class="metric-value deriv">–</span>
           </div>
         </div>
       </div>
-      <div id="surface" class="plot plot-3d"></div>
-      <p class="hint" data-i18n="surfaceHint">Drag to rotate · scroll to zoom · right-drag to pan</p>
+
+      <div class="block">
+        <h2 data-i18n="gdTitle">Gradient descent</h2>
+        <div class="alpha-row">
+          <label for="alpha">α <span class="muted" data-i18n="learningRate">learning rate</span></label>
+          <input type="number" id="alpha" step="any" min="0" inputmode="decimal">
+        </div>
+        <p id="alphaHint" class="alpha-hint"></p>
+        <div class="gd-buttons">
+          <button type="button" id="stepBtn" class="btn" aria-keyshortcuts="S" data-i18n="step">Step</button>
+          <button type="button" id="runBtn" class="btn">30 steps</button>
+          <button type="button" id="convBtn" class="btn primary" aria-keyshortcuts="R">Run to convergence</button>
+        </div>
+        <p id="keysHint" class="keys-hint"></p>
+      </div>
     </section>
 
-    <section class="card table-card">
-      <h2 data-i18n="dataTitle">Dataset and predictions</h2>
+    <!-- Center: the cost surface -->
+    <section class="card stage" aria-labelledby="surfTitle">
+      <div class="stage-head">
+        <h2 id="surfTitle" data-i18n="surfaceTitle">Cost surface J(θ₀, θ₁)</h2>
+        <div class="view-tools">
+          <div class="seg small" role="group" data-i18n-label="view" aria-label="View">
+            <button type="button" data-view="iso" data-i18n="viewIso">3D</button>
+            <button type="button" data-view="top" data-i18n="viewTop">Top</button>
+            <button type="button" data-view="t0">θ₀</button>
+            <button type="button" data-view="t1">θ₁</button>
+          </div>
+          <div class="seg small" role="group" data-i18n-label="rotate" aria-label="Rotation">
+            <button type="button" data-drag="orbit" class="active" aria-pressed="true" data-i18n="orbit">Orbit</button>
+            <button type="button" data-drag="turntable" aria-pressed="false" data-i18n="turntable">Turntable</button>
+          </div>
+        </div>
+      </div>
+      <ul class="legend" aria-label="Legend">
+        <li><span class="sw sw-point"></span><span data-i18n="traceCurrent">current θ</span></li>
+        <li><span class="sw sw-path"></span><span data-i18n="tracePath">GD path</span></li>
+        <li><span class="sw sw-plane"></span><span data-i18n="tracePlane">tangent plane</span></li>
+        <li><span class="sw sw-arrow"></span><span data-i18n="traceGrad">−∇J direction</span></li>
+        <li><span class="sw sw-opt"></span><span data-i18n="traceOptimum">minimum θ*</span></li>
+      </ul>
+      <div class="stage-plot">
+        <div id="surface" class="plot plot-3d" role="img"></div>
+        <div id="gdStatus" class="gd-status" aria-live="polite" hidden>
+          <span class="gd-text"></span>
+          <button type="button" id="statusReset" class="chip-btn" data-i18n="reset" hidden>Reset</button>
+        </div>
+      </div>
+      <p class="hint" data-i18n="surfaceHint">Drag to rotate · scroll to zoom · click the surface to move θ</p>
+    </section>
+
+    <!-- Right: the data -->
+    <section class="card line-card" aria-labelledby="lineTitle">
+      <h2 id="lineTitle" data-i18n="lineTitle">Data and regression line</h2>
+      <div id="linePlot" class="plot plot-2d" role="img"></div>
+    </section>
+
+    <section class="card table-card" aria-labelledby="dataTitle">
+      <h2 id="dataTitle" data-i18n="dataTitle">Dataset and predictions</h2>
       <div class="table-wrap">
         <table id="dataTable">
           <thead></thead>
@@ -120,11 +170,6 @@
           <tfoot></tfoot>
         </table>
       </div>
-    </section>
-
-    <section class="card line-card">
-      <h2 data-i18n="lineTitle">Data and regression line</h2>
-      <div id="linePlot" class="plot plot-2d"></div>
     </section>
   </main>
 

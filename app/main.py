@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -12,6 +13,8 @@ STATIC_DIR = ROOT / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="Regressão Linear — Função de Custo")
+# The model payload is ~300 KB of JSON; gzip cuts it to a fraction.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -27,6 +30,11 @@ model_payload()
 @app.get("/", include_in_schema=False)
 def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/healthz", include_in_schema=False)
+def healthz() -> dict:
+    return {"status": "ok"}
 
 
 @app.get("/api/model")

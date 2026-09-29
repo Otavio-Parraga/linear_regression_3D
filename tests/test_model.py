@@ -127,9 +127,22 @@ def test_api_model():
         assert set(s["range"]) == {"t0", "t1"}
         assert len(s["range"]["t0"]) == 2 and len(s["range"]["t1"]) == 2
         g = s["grid"]
-        assert len(g["t0"]) == 61 and len(g["t1"]) == 61
-        assert len(g["J"]) == 61 and all(len(row) == 61 for row in g["J"])
+        n = M.GRID_N
+        assert len(g["t0"]) == n and len(g["t1"]) == n
+        assert len(g["J"]) == n and all(len(row) == n for row in g["J"])
     assert d["scales"]["original"]["feature"] == d["data"]["x"]
     assert d["scales"]["original"]["J_star"] == pytest.approx(
         d["scales"]["normalized"]["J_star"], abs=1e-5
     )
+
+
+def test_healthz():
+    client = TestClient(app)
+    r = client.get("/healthz")
+    assert r.status_code == 200 and r.json() == {"status": "ok"}
+
+
+def test_model_payload_is_gzipped():
+    client = TestClient(app)
+    r = client.get("/api/model", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and r.headers.get("content-encoding") == "gzip"

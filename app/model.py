@@ -13,7 +13,7 @@ import numpy as np
 X = np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], dtype=float)
 Y = np.array([46.1, 49.8, 56.3, 58.9, 66.2, 69.1, 74.8, 79.5, 83.2, 91.0], dtype=float)
 
-GRID_N = 61
+GRID_N = 101
 # Half-widths of the grid window (t0, t1) around theta_star, per scale.
 HALF_WIDTH = {
     "original": (30.0, 6.0),
