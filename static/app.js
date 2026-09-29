@@ -13,6 +13,7 @@ const state = {
   drag: "orbit",
   running: null,        // { stop(), kind } of the active GD animation
   camera: null,         // 3D camera: set by the View buttons, updated on drag
+  interacting: false,   // pointer/wheel gesture on the 3D plot in progress
   iter: 0,              // GD iterations since the path started
   status: null,         // { key, vars, tone } of the GD status line
 };
@@ -360,13 +361,13 @@ function renderStatus() {
 // Camera / drag mode
 // ---------------------------------------------------------------------------
 const VIEWS = {
-  iso: { eye: { x: 1.4, y: -1.45, z: 0.85 }, up: { x: 0, y: 0, z: 1 } },
+  iso: { eye: { x: 1.5, y: -1.55, z: 0.95 }, up: { x: 0, y: 0, z: 1 } },
   top: { eye: { x: 0, y: 0, z: 2.1 }, up: { x: 0, y: 1, z: 0 } },
   t0: { eye: { x: 0, y: -2.1, z: 0.12 }, up: { x: 0, y: 0, z: 1 } },
   t1: { eye: { x: 2.1, y: 0, z: 0.12 }, up: { x: 0, y: 0, z: 1 } },
 };
 
-const VIEW_CENTER = { x: 0, y: 0, z: -0.06 };
+const VIEW_CENTER = { x: 0, y: 0, z: -0.16 };
 
 function setView(name) {
   if (!HAS_WEBGL) return;
@@ -440,7 +441,6 @@ function renderFormula() {
 
 function renderMetrics(J, grad) {
   $("jVal").textContent = fmt(J, 3);
-  $("jVal").classList.toggle("at-min", J - scaleData().J_star < 5e-4);
   $("g0Val").textContent = fmt(grad[0], 3);
   $("g1Val").textContent = fmt(grad[1], 3);
   $("gnVal").textContent = fmt(Math.hypot(grad[0], grad[1]), 3);
@@ -481,7 +481,7 @@ function themeLayout() {
 }
 
 function hoverLabel(c) {
-  return { bgcolor: c.card, bordercolor: c.border, font: { color: c.text, family: "IBM Plex Mono, monospace", size: c.tick } };
+  return { bgcolor: c.card, bordercolor: c.border, font: { color: c.text, family: "Atkinson Hyperlegible Mono, monospace", size: c.tick } };
 }
 
 function axis3d(title, range, c) {
@@ -516,6 +516,10 @@ function surfaceTop() {
 }
 
 function renderSurface(J, grad) {
+  // While the user rotates or zooms, any redraw (even a data-only restyle)
+  // re-applies Plotly's stored camera and fights the gesture. Hold the 3D
+  // figure still; the run keeps going and the figure catches up on release.
+  if (state.interacting && surfaceEl.data) return;
   if (!HAS_WEBGL) {
     surfaceEl.innerHTML = `<div class="no-webgl">${t("noWebgl")}</div>`;
     return;
@@ -529,7 +533,7 @@ function renderSurface(J, grad) {
   const lift = cap * 0.01; // keep overlays from sinking into the surface
   const col = {
     point: cssVar("--point"), path: cssVar("--path"), deriv: cssVar("--deriv"),
-    opt: cssVar("--optimum"), accent: cssVar("--accent"), mesh: cssVar("--mesh"), derivStrong: cssVar("--deriv-strong"), planeFill: cssVar("--plane-fill"),
+    opt: cssVar("--optimum"), optFill: cssVar("--opt-fill"), optEdge: cssVar("--opt-edge"), accent: cssVar("--accent"), mesh: cssVar("--mesh"), derivStrong: cssVar("--deriv-strong"), planeFill: cssVar("--plane-fill"),
   };
   // z on the tangent plane at (a, b): J + g0 (t0 - a) + g1 (t1 - b)
   const onPlane = (xx, yy) => J + grad[0] * (xx - a) + grad[1] * (yy - b);
@@ -656,7 +660,7 @@ function renderSurface(J, grad) {
   const optimum = {
     type: "scatter3d", mode: "markers",
     x: [s0], y: [s1], z: [s.J_star + lift],
-    marker: { size: 7, symbol: "diamond", color: col.opt, line: { color: "#ffffff", width: 1.5 } },
+    marker: { size: 8, symbol: "diamond", color: col.optFill, line: { color: col.optEdge, width: 2 } },
     hovertemplate: "θ* (%{x:.2f}, %{y:.3f})<br>J* %{z:.3f}<extra></extra>",
   };
 
@@ -666,7 +670,7 @@ function renderSurface(J, grad) {
   const layout = {
     uirevision: "keep",
     paper_bgcolor: c.card,
-    font: { family: "IBM Plex Sans, sans-serif", color: c.text, size: c.tick },
+    font: { family: "Atkinson Hyperlegible Next, Atkinson Hyperlegible, sans-serif", color: c.text, size: c.tick },
     margin: { l: 28, r: 8, t: 0, b: 0 },
     showlegend: false,
     hoverlabel: hoverLabel(c),
@@ -683,10 +687,12 @@ function renderSurface(J, grad) {
     },
   };
 
-  Plotly.react(surfaceEl, [
+  const traces = [
     surface, hide(plane), hide(planeEdge), hide(slices), pathShadow, drop(s0, s1, s.J_star, col.opt),
     hide(drop(a, b, J, col.point)), path, hide(arrowTrace), optimum, hide(halo), hide(current),
-  ], layout, { responsive: true, displaylogo: false, displayModeBar: false });
+  ];
+
+  Plotly.react(surfaceEl, traces, layout, { responsive: true, displaylogo: false, displayModeBar: false });
 }
 
 function renderLine() {
@@ -720,7 +726,7 @@ function renderLine() {
   });
   const layout = {
     paper_bgcolor: c.card, plot_bgcolor: c.card,
-    font: { family: "IBM Plex Sans, sans-serif", color: c.text, size: c.tick },
+    font: { family: "Atkinson Hyperlegible Next, Atkinson Hyperlegible, sans-serif", color: c.text, size: c.tick },
     margin: { l: 8, r: 8, t: 4, b: 8 },
     showlegend: true,
     legend: { orientation: "h", x: 0, y: 1, yanchor: "bottom", font: { size: c.tick, color: c.muted } },
@@ -746,17 +752,49 @@ async function init() {
   syncInputs();
   render();
 
+  // Track the camera while it moves (drag, zoom), not only when it stops:
+  // a running GD redraws every frame, and a stale camera would snap the view
+  // back mid-drag.
+  const followCamera = (ev) => {
+    if (!ev["scene.camera"]) return;
+    state.camera = ev["scene.camera"];
+    markActive("[data-view]", "view", null); // user moved away from the preset
+  };
+  if (HAS_WEBGL) {
+    surfaceEl.on("plotly_relayouting", followCamera);
+    surfaceEl.on("plotly_relayout", followCamera);
+  }
+
   // Click a point on the cost surface to jump there.
-  // Remember where the user rotated to, so redraws never move the camera.
-  if (HAS_WEBGL) surfaceEl.on("plotly_relayout", (ev) => {
-    if (ev["scene.camera"]) {
-      state.camera = ev["scene.camera"];
-      markActive("[data-view]", "view", null); // user rotated away from the preset
-    }
-  });
+  // Plotly's 3D "click" fires when the button goes down, so the start of every
+  // rotation would count as "move θ here". Hold the clicked point until the
+  // button is released and apply it only if the pointer barely moved; rotating
+  // then never moves θ or interrupts a run.
+  let downAt = null, dragged = false, pending = null, wheelTimer = 0;
+  surfaceEl.addEventListener("pointerdown", (e) => {
+    downAt = [e.clientX, e.clientY]; dragged = false; pending = null;
+    state.interacting = true;
+  }, true);
+  surfaceEl.addEventListener("wheel", () => {
+    state.interacting = true;
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => { state.interacting = false; scheduleRender(); }, 250);
+  }, { capture: true, passive: true });
+  window.addEventListener("pointermove", (e) => {
+    if (downAt && Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) dragged = true;
+  }, true);
+  window.addEventListener("pointerup", () => {
+    if (!downAt) return;
+    if (pending && !dragged) setTheta(pending);
+    downAt = null; pending = null;
+    state.interacting = false;
+    scheduleRender();   // one full redraw with the camera where the user left it
+  }, true);
   if (HAS_WEBGL) surfaceEl.on("plotly_click", (ev) => {
     const p = ev.points && ev.points[0];
-    if (p && p.curveNumber === 0) setTheta([p.x, p.y]);
+    if (!p || p.curveNumber !== 0) return;
+    if (downAt) pending = [p.x, p.y];      // button still down: decide on release
+    else if (!dragged) setTheta([p.x, p.y]);
   });
 }
 

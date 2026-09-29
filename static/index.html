@@ -6,7 +6,7 @@
   <title>Regression Cost Explorer</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;500;600&family=Atkinson+Hyperlegible+Next:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
   <link rel="stylesheet" href="/static/style.css">
   <script>
@@ -20,17 +20,14 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
-      <h1 data-i18n="title">Linear Regression Cost Explorer</h1>
-      <p class="subtitle" data-i18n="subtitle">Change the parameters and watch the cost surface respond.</p>
-    </div>
+    <p class="app-name" data-i18n="title">Linear Regression Cost Explorer</p>
     <div class="toggles">
       <span class="toggle-label" id="scaleLabel" data-i18n="scaleLabel">Feature scale</span>
-      <div class="seg" role="group" aria-labelledby="scaleLabel">
+      <div class="tabs" role="group" aria-labelledby="scaleLabel">
         <button type="button" data-scale="original" class="active" aria-pressed="true" data-i18n="scaleOriginal">Original</button>
         <button type="button" data-scale="normalized" aria-pressed="false" data-i18n="scaleNormalized">Normalized</button>
       </div>
-      <div class="seg" role="group" aria-label="Language">
+      <div class="tabs" role="group" aria-label="Language">
         <button type="button" data-lang="en" aria-pressed="true">EN</button>
         <button type="button" data-lang="pt" aria-pressed="false">PT</button>
       </div>
@@ -41,27 +38,39 @@
     </div>
   </header>
 
+  <!-- The live equations are the headline: they change as θ moves. -->
+  <section class="hero" aria-label="Current model">
+    <h1 id="formula" class="eq eq-model"></h1>
+    <div class="eq-cost">
+      <div id="costFormula" class="eq"></div>
+      <span class="eq-equals" aria-hidden="true">=</span>
+      <output id="jVal" class="cost-value">–</output>
+      <span class="eq-aside">
+        <span id="mCount"></span>
+        <span class="eq-min"><span data-i18n="minimum">minimum J*</span> <span id="jStar"></span></span>
+      </span>
+    </div>
+  </section>
+
   <main class="layout">
-    <!-- Left: the function, its cost, and gradient descent -->
-    <section class="card controls" aria-labelledby="hypTitle">
-      <div class="block">
+    <!-- Margin column: parameters, gradient, gradient descent -->
+    <aside class="panel" aria-label="Controls">
+      <section class="block" aria-labelledby="paramsTitle">
         <div class="block-head">
-          <h2 id="hypTitle" data-i18n="hypothesis">Regression function</h2>
+          <h2 id="paramsTitle" data-i18n="paramsTitle">Parameters</h2>
           <div class="actions">
             <button type="button" id="optBtn" class="btn ghost" data-i18n="goOptimum">Go to θ*</button>
             <button type="button" id="resetBtn" class="btn ghost" data-i18n="reset">Reset</button>
           </div>
         </div>
-        <div id="formula" class="formula"></div>
         <p id="normNote" class="note" hidden></p>
-
         <div class="param">
           <div class="param-head">
             <label for="t0Range">θ<sub>0</sub> <span class="muted" data-i18n="intercept">intercept</span></label>
             <input type="number" id="t0Num" step="any" inputmode="decimal" data-i18n-label="t0Value" aria-label="θ0 value">
           </div>
           <input type="range" id="t0Range">
-          <p class="range-note" id="t0Out" data-i18n="outOfRange" hidden>outside the plotted range</p>
+          <p class="range-note" id="t0Out" data-i18n="outOfRange" hidden>Outside the plotted range</p>
         </div>
         <div class="param">
           <div class="param-head">
@@ -69,44 +78,21 @@
             <input type="number" id="t1Num" step="any" inputmode="decimal" data-i18n-label="t1Value" aria-label="θ1 value">
           </div>
           <input type="range" id="t1Range">
-          <p class="range-note" id="t1Out" data-i18n="outOfRange" hidden>outside the plotted range</p>
+          <p class="range-note" id="t1Out" data-i18n="outOfRange" hidden>Outside the plotted range</p>
         </div>
-      </div>
+      </section>
 
-      <div class="block">
-        <div class="block-head">
-          <h2 data-i18n="costTitle">Cost</h2>
-          <span id="mCount" class="muted"></span>
-        </div>
-        <div id="costFormula" class="formula"></div>
-        <div class="cost-row">
-          <div class="cost-main">
-            <span class="metric-label">J(θ)</span>
-            <span id="jVal" class="cost-value">–</span>
-          </div>
-          <div class="cost-min">
-            <span class="metric-label" data-i18n="minimum">minimum J*</span>
-            <span id="jStar" class="metric-value">–</span>
-          </div>
-        </div>
-        <div class="grad-row">
-          <div class="metric">
-            <span class="metric-label">∂J/∂θ<sub>0</sub></span>
-            <span id="g0Val" class="metric-value deriv">–</span>
-          </div>
-          <div class="metric">
-            <span class="metric-label">∂J/∂θ<sub>1</sub></span>
-            <span id="g1Val" class="metric-value deriv">–</span>
-          </div>
-          <div class="metric">
-            <span class="metric-label">‖∇J‖</span>
-            <span id="gnVal" class="metric-value deriv">–</span>
-          </div>
-        </div>
-      </div>
+      <section class="block" aria-labelledby="gradTitle">
+        <h2 id="gradTitle" data-i18n="gradTitle">Gradient at θ</h2>
+        <dl class="grad-row">
+          <div class="metric"><dt>∂J/∂θ<sub>0</sub></dt><dd id="g0Val" class="deriv">–</dd></div>
+          <div class="metric"><dt>∂J/∂θ<sub>1</sub></dt><dd id="g1Val" class="deriv">–</dd></div>
+          <div class="metric"><dt>‖∇J‖</dt><dd id="gnVal" class="deriv">–</dd></div>
+        </dl>
+      </section>
 
-      <div class="block">
-        <h2 data-i18n="gdTitle">Gradient descent</h2>
+      <section class="block" aria-labelledby="gdTitle">
+        <h2 id="gdTitle" data-i18n="gdTitle">Gradient descent</h2>
         <div class="alpha-row">
           <label for="alpha">α <span class="muted" data-i18n="learningRate">learning rate</span></label>
           <input type="number" id="alpha" step="any" min="0" inputmode="decimal">
@@ -118,33 +104,23 @@
           <button type="button" id="convBtn" class="btn primary" aria-keyshortcuts="R">Run to convergence</button>
         </div>
         <p id="keysHint" class="keys-hint"></p>
-      </div>
-    </section>
+      </section>
+    </aside>
 
-    <!-- Center: the cost surface -->
-    <section class="card stage" aria-labelledby="surfTitle">
-      <div class="stage-head">
-        <h2 id="surfTitle" data-i18n="surfaceTitle">Cost surface J(θ₀, θ₁)</h2>
-        <div class="view-tools">
-          <div class="seg small" role="group" data-i18n-label="view" aria-label="View">
-            <button type="button" data-view="iso" data-i18n="viewIso">3D</button>
-            <button type="button" data-view="top" data-i18n="viewTop">Top</button>
-            <button type="button" data-view="t0">θ₀</button>
-            <button type="button" data-view="t1">θ₁</button>
-          </div>
-          <div class="seg small" role="group" data-i18n-label="rotate" aria-label="Rotation">
-            <button type="button" data-drag="orbit" class="active" aria-pressed="true" data-i18n="orbit">Orbit</button>
-            <button type="button" data-drag="turntable" aria-pressed="false" data-i18n="turntable">Turntable</button>
-          </div>
+    <!-- Figure 1: the cost surface -->
+    <figure class="figure stage" aria-labelledby="fig1Caption">
+      <div class="figure-tools">
+        <div class="tabs small" role="group" data-i18n-label="view" aria-label="View">
+          <button type="button" data-view="iso" data-i18n="viewIso">3D</button>
+          <button type="button" data-view="top" data-i18n="viewTop">Top</button>
+          <button type="button" data-view="t0">θ₀</button>
+          <button type="button" data-view="t1">θ₁</button>
+        </div>
+        <div class="tabs small" role="group" data-i18n-label="rotate" aria-label="Rotation">
+          <button type="button" data-drag="orbit" class="active" aria-pressed="true" data-i18n="orbit">Orbit</button>
+          <button type="button" data-drag="turntable" aria-pressed="false" data-i18n="turntable">Turntable</button>
         </div>
       </div>
-      <ul class="legend" aria-label="Legend">
-        <li><span class="sw sw-point"></span><span data-i18n="traceCurrent">current θ</span></li>
-        <li><span class="sw sw-path"></span><span data-i18n="tracePath">GD path</span></li>
-        <li><span class="sw sw-plane"></span><span data-i18n="tracePlane">tangent plane</span></li>
-        <li><span class="sw sw-arrow"></span><span data-i18n="traceGrad">−∇J direction</span></li>
-        <li><span class="sw sw-opt"></span><span data-i18n="traceOptimum">minimum θ*</span></li>
-      </ul>
       <div class="stage-plot">
         <div id="surface" class="plot plot-3d" role="img"></div>
         <div id="gdStatus" class="gd-status" aria-live="polite" hidden>
@@ -152,17 +128,32 @@
           <button type="button" id="statusReset" class="chip-btn" data-i18n="reset" hidden>Reset</button>
         </div>
       </div>
-      <p class="hint" data-i18n="surfaceHint">Drag to rotate · scroll to zoom · click the surface to move θ</p>
-    </section>
+      <figcaption id="fig1Caption">
+        <span class="fig-no" data-i18n="fig1">Figure 1.</span>
+        <span data-i18n="fig1Text">Cost J over the parameter plane (θ₀, θ₁).</span>
+        <span class="key"><span class="sw sw-point"></span><span data-i18n="traceCurrent">current θ</span></span>
+        <span class="key"><span class="sw sw-path"></span><span data-i18n="tracePath">GD path</span></span>
+        <span class="key"><span class="sw sw-plane"></span><span data-i18n="tracePlane">tangent plane</span></span>
+        <span class="key"><span class="sw sw-arrow"></span><span data-i18n="traceGrad">−∇J direction</span></span>
+        <span class="key"><span class="sw sw-opt"></span><span data-i18n="traceOptimum">minimum θ*</span></span>
+        <span class="hint" data-i18n="surfaceHint">Drag to rotate, scroll to zoom, click the surface to move θ.</span>
+      </figcaption>
+    </figure>
 
-    <!-- Right: the data -->
-    <section class="card line-card" aria-labelledby="lineTitle">
-      <h2 id="lineTitle" data-i18n="lineTitle">Data and regression line</h2>
+    <!-- Figure 2 and Table 1: the data -->
+    <figure class="figure line-fig" aria-labelledby="fig2Caption">
       <div id="linePlot" class="plot plot-2d" role="img"></div>
-    </section>
+      <figcaption id="fig2Caption">
+        <span class="fig-no" data-i18n="fig2">Figure 2.</span>
+        <span data-i18n="fig2Text">Data and the current regression line; dotted lines are the residuals.</span>
+      </figcaption>
+    </figure>
 
-    <section class="card table-card" aria-labelledby="dataTitle">
-      <h2 id="dataTitle" data-i18n="dataTitle">Dataset and predictions</h2>
+    <figure class="figure table-fig" aria-labelledby="tableCaption">
+      <figcaption id="tableCaption">
+        <span class="fig-no" data-i18n="table1">Table 1.</span>
+        <span data-i18n="table1Text">Data, predictions and each point's squared error.</span>
+      </figcaption>
       <div class="table-wrap">
         <table id="dataTable">
           <thead></thead>
@@ -170,7 +161,7 @@
           <tfoot></tfoot>
         </table>
       </div>
-    </section>
+    </figure>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
