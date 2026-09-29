@@ -146,3 +146,13 @@ def test_model_payload_is_gzipped():
     client = TestClient(app)
     r = client.get("/api/model", headers={"Accept-Encoding": "gzip"})
     assert r.status_code == 200 and r.headers.get("content-encoding") == "gzip"
+
+
+def test_index_links_versioned_assets_and_asks_to_revalidate():
+    from app.main import ASSET_VERSION
+    client = TestClient(app)
+    r = client.get("/")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"
+    for name in ("style.css", "i18n.js", "app.js"):
+        assert f"/static/{name}?v={ASSET_VERSION}" in r.text
+    assert client.get(f"/static/app.js?v={ASSET_VERSION}").headers["cache-control"] == "no-cache"
